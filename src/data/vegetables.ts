@@ -1,0 +1,68 @@
+import type { Vegetable } from "@/types/vegetable";
+
+export const vegetables: Vegetable[] = [
+  {
+    id: "cherry-tomatoes",
+    name: "Cherry tomatoes",
+    description: "Sweet and thin-skinned. Best the day they arrive.",
+    priceCents: 500,
+    unit: "pint",
+    available: true,
+  },
+  {
+    id: "lacinato-kale",
+    name: "Lacinato kale",
+    description: "Dark, sturdy leaves. Holds up in a soup or a raw salad.",
+    priceCents: 350,
+    unit: "bunch",
+    available: true,
+  },
+  {
+    id: "carrots",
+    name: "Carrots",
+    description: "Dug this week. Tops trimmed so they stay crisp.",
+    priceCents: 275,
+    unit: "lb",
+    available: true,
+  },
+  {
+    id: "zucchini",
+    name: "Zucchini",
+    description: "Small fruit, picked before they get watery.",
+    priceCents: 200,
+    unit: "lb",
+    available: true,
+  },
+  {
+    id: "green-beans",
+    name: "Green beans",
+    description: "Snap beans from the trellis. Stringless.",
+    priceCents: 400,
+    unit: "lb",
+    available: true,
+  },
+  {
+    id: "sweet-corn",
+    name: "Sweet corn",
+    description: "Packed the morning of shipment so the sugar has not turned.",
+    priceCents: 75,
+    unit: "ear",
+    available: true,
+  },
+  {
+    id: "butterhead-lettuce",
+    name: "Butterhead lettuce",
+    description: "Loose heads. Back when the next planting sizes up.",
+    priceCents: 300,
+    unit: "head",
+    available: false,
+  },
+  {
+    id: "beets",
+    name: "Beets",
+    description: "Red beets with greens attached when the tops are still tender.",
+    priceCents: 300,
+    unit: "bunch",
+    available: false,
+  },
+];

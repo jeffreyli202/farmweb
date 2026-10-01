@@ -1,0 +1,26 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f3efe6;
+  --foreground: #1c2416;
+  --leaf: #234833;
+  --clay: #b85c38;
+  --card: #fbf8f2;
+  --line: #ddd4c4;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-leaf: var(--leaf);
+  --color-clay: var(--clay);
+  --color-card: var(--card);
+  --color-line: var(--line);
+  --font-sans: var(--font-source-sans), "Source Sans 3", sans-serif;
+  --font-serif: var(--font-fraunces), Georgia, serif;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+}
