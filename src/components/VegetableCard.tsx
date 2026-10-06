@@ -1,3 +1,4 @@
+import { CartControls } from "@/components/CartControls";
 import { formatPrice } from "@/lib/money";
 import type { Vegetable } from "@/types/vegetable";
 
@@ -19,17 +20,10 @@ export function VegetableCard({ vegetable }: VegetableCardProps) {
       </div>
       <p className="mt-3 flex-1 text-foreground/80">{vegetable.description}</p>
       <div className="mt-5 flex justify-end text-sm">
-        <button
-          type="button"
-          disabled={!vegetable.available}
-          className={
-            vegetable.available
-              ? "rounded-full bg-leaf px-4 py-2 font-medium text-card"
-              : "cursor-not-allowed rounded-full bg-line px-4 py-2 font-medium text-foreground/50"
-          }
-        >
-          {vegetable.available ? "Add to cart" : "Sold out"}
-        </button>
+        <CartControls
+          vegetableId={vegetable.id}
+          available={vegetable.available}
+        />
       </div>
     </article>
   );
