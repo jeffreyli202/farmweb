@@ -1,36 +1,36 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Li Farm
 
-## Getting Started
+Li Farm is an online shop for vegetables from the farm. Shoppers browse what is for sale, keep a cart, create an account, and pay by card. Admins can add products, change prices, mark items sold out, and review orders.
 
-First, run the development server:
+This project is in development. It is a working practice store, not a finished public shop. Card checkout uses Stripe test mode, so payments are not real charges. Signup verification and order receipts are not emailed yet.
+
+## What it does
+
+- The home page introduces the farm. Products live at `/products`.
+- The cart checks submitted prices against the database, then opens Stripe Checkout. An order stays unpaid until Stripe confirms the amount.
+- Accounts use a password and an email verification step. In local development the verification link is shown on the page.
+- The database is hosted on Turso. Product rows are created there, and a missing starter crop is filled from `src/data/vegetables.ts` without overwriting a price that was already saved.
+
+## Run it locally
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Create a `.env` file in the project root. It is gitignored.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```
+TURSO_DATABASE_URL=libsql://...
+TURSO_AUTH_TOKEN=...
+STRIPE_SECRET_KEY=sk_test_...
+```
 
-## Learn More
+`STRIPE_WEBHOOK_SECRET` is needed when Stripe should mark an order paid even if the shopper never returns to the site. For local testing, forward events with the Stripe CLI:
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+stripe listen --forward-to localhost:3000/api/stripe/webhook
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Use test card `4242 4242 4242 4242`, any future expiry, and any CVC.
