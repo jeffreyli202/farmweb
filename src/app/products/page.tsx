@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { VegetableList } from "@/components/VegetableList";
 import { farm } from "@/data/farm";
-import { vegetables } from "@/data/vegetables";
+import { listProducts } from "@/lib/orders";
 
 export const metadata: Metadata = {
   title: `Products | ${farm.name}`,
@@ -9,6 +9,7 @@ export const metadata: Metadata = {
 };
 
 export default function ProductsPage() {
+  const vegetables = listProducts();
   const inStock = vegetables.filter((vegetable) => vegetable.available);
   const soldOut = vegetables.filter((vegetable) => !vegetable.available);
 

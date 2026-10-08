@@ -18,6 +18,11 @@ export async function SiteHeader() {
             Products
           </Link>
           <CartLink />
+          {user?.isAdmin ? (
+            <Link href="/admin" className="text-sm font-medium text-foreground">
+              Admin
+            </Link>
+          ) : null}
           {user ? (
             <>
               <span className="max-w-48 truncate text-sm text-foreground/70">{user.email}</span>

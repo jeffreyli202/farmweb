@@ -17,6 +17,7 @@ type CartContextValue = {
   itemCount: number;
   addOne: (id: string) => void;
   removeOne: (id: string) => void;
+  clearCart: () => void;
 };
 
 const EMPTY: Quantities = {};
@@ -101,6 +102,10 @@ function addOne(id: string) {
   });
 }
 
+function clearCart() {
+  write(EMPTY);
+}
+
 function removeOne(id: string) {
   const current = parse(cached);
   const nextQuantity = (current[id] ?? 0) - 1;
@@ -128,6 +133,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       ),
       addOne,
       removeOne,
+      clearCart,
     };
   }, [quantities]);
 

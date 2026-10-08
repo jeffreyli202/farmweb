@@ -1,4 +1,5 @@
 import { cookies, headers } from "next/headers";
+import { adminEmails } from "@/data/admins";
 import { getDb } from "@/lib/db";
 import type { AuthFormState, CurrentUser, VerifyState } from "@/lib/auth-types";
 import { hashPassword, verifyPassword } from "@/lib/password";
@@ -176,19 +177,28 @@ export async function getCurrentUser(): Promise<CurrentUser | null> {
   const now = new Date().toISOString();
   const row = db
     .prepare(
-      `SELECT users.id, users.email
+      `SELECT users.id, users.email, users.is_admin
        FROM sessions
        JOIN users ON users.id = sessions.user_id
        WHERE sessions.token_hash = ? AND sessions.expires_at > ?`,
     )
-    .get(hashToken(token), now) as CurrentUser | undefined;
+    .get(hashToken(token), now) as
+    | { id: number; email: string; is_admin: number }
+    | undefined;
 
   if (!row) {
     getDb().prepare("DELETE FROM sessions WHERE token_hash = ?").run(hashToken(token));
     return null;
   }
 
-  return row;
+  const isAdmin = adminEmails.some(
+    (entry) => entry.trim().toLowerCase() === row.email,
+  );
+  if ((row.is_admin === 1) !== isAdmin) {
+    db.prepare("UPDATE users SET is_admin = ? WHERE id = ?").run(isAdmin ? 1 : 0, row.id);
+  }
+
+  return { id: row.id, email: row.email, isAdmin };
 }
 
 export async function logout() {

@@ -11,4 +11,5 @@ export type VerifyState = {
 export type CurrentUser = {
   id: number;
   email: string;
+  isAdmin: boolean;
 };
