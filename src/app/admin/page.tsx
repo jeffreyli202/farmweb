@@ -42,8 +42,8 @@ export default async function AdminPage({
 
   const params = await searchParams;
   const error = Array.isArray(params.error) ? params.error[0] : params.error;
-  const products = listAdminProducts();
-  const orders = listAdminOrders();
+  const products = await listAdminProducts();
+  const orders = await listAdminOrders();
 
   return (
     <main>

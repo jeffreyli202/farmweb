@@ -1,5 +1,5 @@
 import { farm } from "@/data/farm";
-import { getDb } from "@/lib/db";
+import { dbAll, dbGet, dbRun } from "@/lib/db";
 import { formatPrice } from "@/lib/money";
 
 export type ReceiptResult = "sent" | "already" | "unconfigured" | "failed" | "skipped";
@@ -13,15 +13,13 @@ type PaidOrder = {
 };
 
 export async function sendOrderReceipt(orderId: number): Promise<ReceiptResult> {
-  const db = getDb();
-  const order = db
-    .prepare(
-      `SELECT orders.id, orders.total_cents, orders.status, orders.receipt_sent_at, users.email
-       FROM orders
-       JOIN users ON users.id = orders.user_id
-       WHERE orders.id = ?`,
-    )
-    .get(orderId) as PaidOrder | undefined;
+  const order = await dbGet<PaidOrder>(
+    `SELECT orders.id, orders.total_cents, orders.status, orders.receipt_sent_at, users.email
+     FROM orders
+     JOIN users ON users.id = orders.user_id
+     WHERE orders.id = ?`,
+    [orderId],
+  );
   if (!order || order.status !== "paid") {
     return "skipped";
   }
@@ -35,20 +33,18 @@ export async function sendOrderReceipt(orderId: number): Promise<ReceiptResult> 
     return "unconfigured";
   }
 
-  const claimed = db
-    .prepare(
-      "UPDATE orders SET receipt_sent_at = ? WHERE id = ? AND receipt_sent_at IS NULL",
-    )
-    .run(new Date().toISOString(), orderId);
+  const claimed = await dbRun(
+    "UPDATE orders SET receipt_sent_at = ? WHERE id = ? AND receipt_sent_at IS NULL",
+    [new Date().toISOString(), orderId],
+  );
   if (claimed.changes !== 1) {
     return "already";
   }
 
-  const items = db
-    .prepare(
-      "SELECT name, quantity, line_cents FROM order_items WHERE order_id = ? ORDER BY id",
-    )
-    .all(orderId) as Array<{ name: string; quantity: number; line_cents: number }>;
+  const items = await dbAll<{ name: string; quantity: number; line_cents: number }>(
+    "SELECT name, quantity, line_cents FROM order_items WHERE order_id = ? ORDER BY id",
+    [orderId],
+  );
   const itemLines = items
     .map((item) => `${item.name} × ${item.quantity} — ${formatPrice(item.line_cents)}`)
     .join("\n");
@@ -78,13 +74,13 @@ export async function sendOrderReceipt(orderId: number): Promise<ReceiptResult> 
     });
     if (!response.ok) {
       console.error(await response.text());
-      db.prepare("UPDATE orders SET receipt_sent_at = NULL WHERE id = ?").run(orderId);
+      await dbRun("UPDATE orders SET receipt_sent_at = NULL WHERE id = ?", [orderId]);
       return "failed";
     }
     return "sent";
   } catch (error) {
     console.error(error);
-    db.prepare("UPDATE orders SET receipt_sent_at = NULL WHERE id = ?").run(orderId);
+    await dbRun("UPDATE orders SET receipt_sent_at = NULL WHERE id = ?", [orderId]);
     return "failed";
   }
 }

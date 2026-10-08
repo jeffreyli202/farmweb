@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import type Stripe from "stripe";
-import { getDb } from "@/lib/db";
+import { dbAll, dbGet, dbRun, dbWrite } from "@/lib/db";
 import { getStripe } from "@/lib/stripe";
 import { getCurrentUser } from "@/lib/users";
 
@@ -34,14 +34,12 @@ type ProductRow = {
   available: number;
 };
 
-export function listProducts(): CatalogProduct[] {
-  const rows = getDb()
-    .prepare(
-      `SELECT id, name, description, price_cents, unit, available
-       FROM products
-       ORDER BY position`,
-    )
-    .all() as ProductRow[];
+export async function listProducts(): Promise<CatalogProduct[]> {
+  const rows = await dbAll<ProductRow>(
+    `SELECT id, name, description, price_cents, unit, available
+     FROM products
+     ORDER BY position`,
+  );
 
   return rows.map((row) => ({
     id: row.id,
@@ -73,7 +71,6 @@ export async function placeOrder(formData: FormData): Promise<OrderState> {
     return { error: "The cart has a duplicate product." };
   }
 
-  const db = getDb();
   const lines: Array<{
     productId: string;
     name: string;
@@ -93,11 +90,10 @@ export async function placeOrder(formData: FormData): Promise<OrderState> {
       return { error: "A price in this order is not valid." };
     }
 
-    const product = db
-      .prepare(
-        "SELECT id, name, price_cents, unit, available FROM products WHERE id = ?",
-      )
-      .get(productId) as ProductRow | undefined;
+    const product = await dbGet<ProductRow>(
+      "SELECT id, name, price_cents, unit, available FROM products WHERE id = ?",
+      [productId],
+    );
     if (!product) {
       return { error: "A product in this order is not in the database." };
     }
@@ -125,35 +121,28 @@ export async function placeOrder(formData: FormData): Promise<OrderState> {
   }
 
   const totalCents = lines.reduce((sum, line) => sum + line.lineCents, 0);
-  db.exec("BEGIN");
-  let orderId = 0;
-  try {
-    const created = db
-      .prepare(
-        "INSERT INTO orders (user_id, total_cents, status, created_at) VALUES (?, ?, 'unpaid', ?)",
-      )
-      .run(user.id, totalCents, new Date().toISOString());
-    orderId = Number(created.lastInsertRowid);
-    const insertItem = db.prepare(
-      `INSERT INTO order_items
-         (order_id, product_id, name, unit_price_cents, quantity, line_cents)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+  const orderId = await dbWrite(async (tx) => {
+    const created = await tx.run(
+      "INSERT INTO orders (user_id, total_cents, status, created_at) VALUES (?, ?, 'unpaid', ?)",
+      [user.id, totalCents, new Date().toISOString()],
     );
     for (const line of lines) {
-      insertItem.run(
-        orderId,
-        line.productId,
-        line.name,
-        line.unitPriceCents,
-        line.quantity,
-        line.lineCents,
+      await tx.run(
+        `INSERT INTO order_items
+           (order_id, product_id, name, unit_price_cents, quantity, line_cents)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          created.lastInsertRowid,
+          line.productId,
+          line.name,
+          line.unitPriceCents,
+          line.quantity,
+          line.lineCents,
+        ],
       );
     }
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
+    return created.lastInsertRowid;
+  });
 
   const origin = await appOrigin();
   try {
@@ -175,16 +164,16 @@ export async function placeOrder(formData: FormData): Promise<OrderState> {
     if (!session.url) {
       throw new Error("Stripe did not return a checkout URL.");
     }
-    db.prepare("UPDATE orders SET stripe_session_id = ? WHERE id = ?").run(session.id, orderId);
+    await dbRun("UPDATE orders SET stripe_session_id = ? WHERE id = ?", [session.id, orderId]);
     return { checkoutUrl: session.url };
   } catch (error) {
-    db.prepare("DELETE FROM orders WHERE id = ?").run(orderId);
+    await dbRun("DELETE FROM orders WHERE id = ?", [orderId]);
     console.error(error);
     return { error: "Payment could not be started. Nothing was charged." };
   }
 }
 
-export function applyCheckoutSession(session: Stripe.Checkout.Session) {
+export async function applyCheckoutSession(session: Stripe.Checkout.Session) {
   if (session.payment_status !== "paid" || session.amount_total === null) {
     return "unpaid" as const;
   }
@@ -204,13 +193,13 @@ export async function recordPaidCheckoutSession(sessionId: string) {
   return applyCheckoutSession(session);
 }
 
-export function markOrderPaid(orderId: number, sessionId: string, amountTotal: number) {
-  const db = getDb();
-  const order = db
-    .prepare("SELECT id, total_cents, status, stripe_session_id FROM orders WHERE id = ?")
-    .get(orderId) as
-    | { id: number; total_cents: number; status: string; stripe_session_id: string | null }
-    | undefined;
+export async function markOrderPaid(orderId: number, sessionId: string, amountTotal: number) {
+  const order = await dbGet<{
+    id: number;
+    total_cents: number;
+    status: string;
+    stripe_session_id: string | null;
+  }>("SELECT id, total_cents, status, stripe_session_id FROM orders WHERE id = ?", [orderId]);
   if (!order) {
     return "missing" as const;
   }
@@ -223,9 +212,10 @@ export function markOrderPaid(orderId: number, sessionId: string, amountTotal: n
   if (order.status === "paid") {
     return "paid" as const;
   }
-  db.prepare(
+  await dbRun(
     "UPDATE orders SET status = 'paid', stripe_session_id = ? WHERE id = ? AND status = 'unpaid'",
-  ).run(sessionId, orderId);
+    [sessionId, orderId],
+  );
   return "paid" as const;
 }
 
@@ -234,13 +224,15 @@ export async function getOwnOrder(orderId: number): Promise<StoredOrder | undefi
   if (!user) {
     return undefined;
   }
-  const row = getDb()
-    .prepare(
-      "SELECT id, total_cents, status, created_at FROM orders WHERE id = ? AND user_id = ?",
-    )
-    .get(orderId, user.id) as
-    | { id: number; total_cents: number; status: string; created_at: string }
-    | undefined;
+  const row = await dbGet<{
+    id: number;
+    total_cents: number;
+    status: string;
+    created_at: string;
+  }>("SELECT id, total_cents, status, created_at FROM orders WHERE id = ? AND user_id = ?", [
+    orderId,
+    user.id,
+  ]);
   if (!row || (row.status !== "paid" && row.status !== "unpaid")) {
     return undefined;
   }

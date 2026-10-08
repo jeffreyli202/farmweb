@@ -1,20 +1,95 @@
-import fs from "node:fs";
-import path from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { createClient, type Client, type InValue, type ResultSet } from "@libsql/client";
 import { vegetables } from "@/data/vegetables";
 
-const dbPath = path.join(process.cwd(), "data", "farm.sqlite");
+let client: Client | undefined;
+let ready: Promise<void> | undefined;
 
-let database: DatabaseSync | undefined;
-
-export function getDb() {
-  if (database) {
-    return database;
+function getClient() {
+  if (client) {
+    return client;
   }
 
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-  database = new DatabaseSync(dbPath);
-  database.exec(`
+  const url = process.env.TURSO_DATABASE_URL;
+  const authToken = process.env.TURSO_AUTH_TOKEN;
+  if (!url || !authToken) {
+    throw new Error("Set TURSO_DATABASE_URL and TURSO_AUTH_TOKEN in .env.");
+  }
+
+  client = createClient({ url, authToken });
+  ready = migrate(client);
+  return client;
+}
+
+async function readyDb() {
+  getClient();
+  await ready;
+}
+
+function rowsOf<T>(result: ResultSet): T[] {
+  return result.rows.map((row) => {
+    const plain: Record<string, unknown> = {};
+    result.columns.forEach((column, index) => {
+      const value = row[index];
+      plain[column] = typeof value === "bigint" ? Number(value) : value;
+    });
+    return plain as T;
+  });
+}
+
+export async function dbAll<T>(sql: string, args: InValue[] = []): Promise<T[]> {
+  await readyDb();
+  const result = await getClient().execute({ sql, args });
+  return rowsOf<T>(result);
+}
+
+export async function dbGet<T>(sql: string, args: InValue[] = []): Promise<T | undefined> {
+  const rows = await dbAll<T>(sql, args);
+  return rows[0];
+}
+
+export async function dbRun(sql: string, args: InValue[] = []) {
+  await readyDb();
+  const result = await getClient().execute({ sql, args });
+  return {
+    changes: result.rowsAffected,
+    lastInsertRowid: Number(result.lastInsertRowid ?? 0),
+  };
+}
+
+type DbStatement = {
+  get<T>(sql: string, args?: InValue[]): Promise<T | undefined>;
+  run(sql: string, args?: InValue[]): Promise<{ changes: number; lastInsertRowid: number }>;
+};
+
+export async function dbWrite<T>(run: (tx: DbStatement) => Promise<T>): Promise<T> {
+  await readyDb();
+  const tx = await getClient().transaction("write");
+  try {
+    const value = await run({
+      async get<T>(sql: string, args: InValue[] = []) {
+        const result = await tx.execute({ sql, args });
+        return rowsOf<T>(result)[0];
+      },
+      async run(sql: string, args: InValue[] = []) {
+        const result = await tx.execute({ sql, args });
+        return {
+          changes: result.rowsAffected,
+          lastInsertRowid: Number(result.lastInsertRowid ?? 0),
+        };
+      },
+    });
+    await tx.commit();
+    return value;
+  } catch (error) {
+    await tx.rollback();
+    throw error;
+  } finally {
+    tx.close();
+  }
+}
+
+async function migrate(database: Client) {
+  await database.executeMultiple(`
     PRAGMA foreign_keys = ON;
 
     CREATE TABLE IF NOT EXISTS users (
@@ -68,49 +143,48 @@ export function getDb() {
       line_cents INTEGER NOT NULL
     );
   `);
-  ensureColumn(database, "users", "is_admin", "INTEGER NOT NULL DEFAULT 0");
-  ensureColumn(database, "products", "description", "TEXT NOT NULL DEFAULT ''");
-  ensureColumn(database, "orders", "status", "TEXT NOT NULL DEFAULT 'unpaid'");
-  ensureColumn(database, "orders", "stripe_session_id", "TEXT");
-  ensureColumn(database, "orders", "receipt_sent_at", "TEXT");
-  seedProducts(database);
 
-  return database;
+  await ensureColumn(database, "users", "is_admin", "INTEGER NOT NULL DEFAULT 0");
+  await ensureColumn(database, "products", "description", "TEXT NOT NULL DEFAULT ''");
+  await ensureColumn(database, "orders", "status", "TEXT NOT NULL DEFAULT 'unpaid'");
+  await ensureColumn(database, "orders", "stripe_session_id", "TEXT");
+  await ensureColumn(database, "orders", "receipt_sent_at", "TEXT");
+  await seedProducts(database);
 }
 
-function ensureColumn(
-  db: DatabaseSync,
+async function ensureColumn(
+  database: Client,
   table: "users" | "products" | "orders",
   column: string,
   definition: string,
 ) {
-  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>;
-  if (columns.some((entry) => entry.name === column)) {
+  const info = await database.execute(`PRAGMA table_info(${table})`);
+  const names = rowsOf<{ name: string }>(info).map((entry) => entry.name);
+  if (names.includes(column)) {
     return;
   }
-  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+  await database.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
 }
 
-function seedProducts(db: DatabaseSync) {
-  const insert = db.prepare(`
-    INSERT OR IGNORE INTO products
-      (id, name, description, price_cents, unit, available, position)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-  const fillDescription = db.prepare(
-    "UPDATE products SET description = ? WHERE id = ? AND description = ''",
-  );
-
-  vegetables.forEach((vegetable, index) => {
-    insert.run(
-      vegetable.id,
-      vegetable.name,
-      vegetable.description,
-      vegetable.priceCents,
-      vegetable.unit,
-      vegetable.available ? 1 : 0,
-      index,
-    );
-    fillDescription.run(vegetable.description, vegetable.id);
-  });
+async function seedProducts(database: Client) {
+  for (const [index, vegetable] of vegetables.entries()) {
+    await database.execute({
+      sql: `INSERT OR IGNORE INTO products
+        (id, name, description, price_cents, unit, available, position)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      args: [
+        vegetable.id,
+        vegetable.name,
+        vegetable.description,
+        vegetable.priceCents,
+        vegetable.unit,
+        vegetable.available ? 1 : 0,
+        index,
+      ],
+    });
+    await database.execute({
+      sql: "UPDATE products SET description = ? WHERE id = ? AND description = ''",
+      args: [vegetable.description, vegetable.id],
+    });
+  }
 }

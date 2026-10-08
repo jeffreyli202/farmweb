@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 };
 
 export default async function CartPage() {
-  const products = listProducts();
+  const products = await listProducts();
   const user = await getCurrentUser();
 
   return (

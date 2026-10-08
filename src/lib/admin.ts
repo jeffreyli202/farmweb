@@ -1,4 +1,4 @@
-import { getDb } from "@/lib/db";
+import { dbAll, dbGet, dbRun } from "@/lib/db";
 import type { CatalogProduct } from "@/lib/orders";
 import { listProducts } from "@/lib/orders";
 import { getCurrentUser } from "@/lib/users";
@@ -34,35 +34,30 @@ export async function requireAdmin(): Promise<CurrentUser | undefined> {
   return user;
 }
 
-export function listAdminOrders(): AdminOrder[] {
-  const db = getDb();
-  const orders = db
-    .prepare(
-      `SELECT orders.id, orders.total_cents, orders.status, orders.created_at, users.email
-       FROM orders
-       JOIN users ON users.id = orders.user_id
-       ORDER BY orders.id DESC`,
-    )
-    .all() as Array<{
+export async function listAdminOrders(): Promise<AdminOrder[]> {
+  const orders = await dbAll<{
     id: number;
     total_cents: number;
     status: string;
     created_at: string;
     email: string;
-  }>;
-  const items = db
-    .prepare(
-      `SELECT order_id, name, quantity, unit_price_cents, line_cents
-       FROM order_items
-       ORDER BY id`,
-    )
-    .all() as Array<{
+  }>(
+    `SELECT orders.id, orders.total_cents, orders.status, orders.created_at, users.email
+     FROM orders
+     JOIN users ON users.id = orders.user_id
+     ORDER BY orders.id DESC`,
+  );
+  const items = await dbAll<{
     order_id: number;
     name: string;
     quantity: number;
     unit_price_cents: number;
     line_cents: number;
-  }>;
+  }>(
+    `SELECT order_id, name, quantity, unit_price_cents, line_cents
+     FROM order_items
+     ORDER BY id`,
+  );
 
   return orders.map((order) => ({
     id: order.id,
@@ -81,7 +76,7 @@ export function listAdminOrders(): AdminOrder[] {
   }));
 }
 
-export function listAdminProducts(): CatalogProduct[] {
+export async function listAdminProducts(): Promise<CatalogProduct[]> {
   return listProducts();
 }
 
@@ -115,20 +110,20 @@ export async function addProduct(formData: FormData): Promise<AdminFormState> {
     return { error: "Use a name that contains letters or numbers." };
   }
 
-  const db = getDb();
-  const existing = db.prepare("SELECT id FROM products WHERE id = ?").get(id);
+  const existing = await dbGet<{ id: string }>("SELECT id FROM products WHERE id = ?", [id]);
   if (existing) {
     return { error: "A product with that name already exists." };
   }
 
-  const positionRow = db
-    .prepare("SELECT COALESCE(MAX(position), -1) AS position FROM products")
-    .get() as { position: number };
-  db.prepare(
+  const positionRow = await dbGet<{ position: number }>(
+    "SELECT COALESCE(MAX(position), -1) AS position FROM products",
+  );
+  await dbRun(
     `INSERT INTO products
        (id, name, description, price_cents, unit, available, position)
      VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(id, name, description, priceCents, unit, available ? 1 : 0, positionRow.position + 1);
+    [id, name, description, priceCents, unit, available ? 1 : 0, (positionRow?.position ?? -1) + 1],
+  );
 
   return {};
 }
@@ -145,9 +140,10 @@ export async function updateProductPrice(formData: FormData): Promise<AdminFormS
     return { error: "Enter a price in dollars, such as 3.50." };
   }
 
-  const result = getDb()
-    .prepare("UPDATE products SET price_cents = ? WHERE id = ?")
-    .run(priceCents, productId);
+  const result = await dbRun("UPDATE products SET price_cents = ? WHERE id = ?", [
+    priceCents,
+    productId,
+  ]);
   if (result.changes === 0) {
     return { error: "That product is not in the database." };
   }
@@ -166,9 +162,10 @@ export async function setProductAvailability(formData: FormData): Promise<AdminF
     return { error: "Availability could not be read." };
   }
 
-  const result = getDb()
-    .prepare("UPDATE products SET available = ? WHERE id = ?")
-    .run(Number(available), productId);
+  const result = await dbRun("UPDATE products SET available = ? WHERE id = ?", [
+    Number(available),
+    productId,
+  ]);
   if (result.changes === 0) {
     return { error: "That product is not in the database." };
   }

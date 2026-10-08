@@ -8,8 +8,8 @@ export const metadata: Metadata = {
   description: "Vegetables available to order online.",
 };
 
-export default function ProductsPage() {
-  const vegetables = listProducts();
+export default async function ProductsPage() {
+  const vegetables = await listProducts();
   const inStock = vegetables.filter((vegetable) => vegetable.available);
   const soldOut = vegetables.filter((vegetable) => !vegetable.available);
 

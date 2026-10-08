@@ -27,7 +27,7 @@ export async function POST(request: Request) {
     event.type === "checkout.session.completed" ||
     event.type === "checkout.session.async_payment_succeeded"
   ) {
-    const result = applyCheckoutSession(event.data.object);
+    const result = await applyCheckoutSession(event.data.object);
     if (result === "mismatch") {
       return NextResponse.json({ error: "Payment does not match the order." }, { status: 400 });
     }
