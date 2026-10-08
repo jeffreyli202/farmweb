@@ -19,6 +19,7 @@ export type AdminOrder = {
   id: number;
   email: string;
   totalCents: number;
+  status: string;
   createdAt: string;
   items: AdminOrderItem[];
 };
@@ -37,7 +38,7 @@ export function listAdminOrders(): AdminOrder[] {
   const db = getDb();
   const orders = db
     .prepare(
-      `SELECT orders.id, orders.total_cents, orders.created_at, users.email
+      `SELECT orders.id, orders.total_cents, orders.status, orders.created_at, users.email
        FROM orders
        JOIN users ON users.id = orders.user_id
        ORDER BY orders.id DESC`,
@@ -45,6 +46,7 @@ export function listAdminOrders(): AdminOrder[] {
     .all() as Array<{
     id: number;
     total_cents: number;
+    status: string;
     created_at: string;
     email: string;
   }>;
@@ -66,6 +68,7 @@ export function listAdminOrders(): AdminOrder[] {
     id: order.id,
     email: order.email,
     totalCents: order.total_cents,
+    status: order.status,
     createdAt: order.created_at,
     items: items
       .filter((item) => item.order_id === order.id)

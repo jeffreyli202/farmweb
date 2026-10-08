@@ -23,23 +23,14 @@ function SubmitOrderButton() {
       disabled={pending}
       className="rounded-full bg-leaf px-4 py-2 font-medium text-card disabled:cursor-not-allowed disabled:bg-line disabled:text-foreground/50"
     >
-      {pending ? "Checking prices" : "Submit order"}
+      {pending ? "Checking prices" : "Pay with card"}
     </button>
   );
 }
 
 export function CartSummary({ products, signedIn }: CartSummaryProps) {
-  const { quantities, clearCart } = useCart();
-  const [state, formAction] = useActionState(
-    async (previous: OrderState, formData: FormData) => {
-      const result = await placeOrderAction(previous, formData);
-      if (result.orderId) {
-        clearCart();
-      }
-      return result;
-    },
-    {},
-  );
+  const { quantities } = useCart();
+  const [state, formAction] = useActionState<OrderState, FormData>(placeOrderAction, {});
   const lines = products.flatMap((product) => {
     const quantity = quantities[product.id] ?? 0;
     if (quantity === 0) {
@@ -54,20 +45,6 @@ export function CartSummary({ products, signedIn }: CartSummaryProps) {
     ];
   });
   const totalCents = lines.reduce((sum, line) => sum + line.lineCents, 0);
-
-  if (state.orderId) {
-    return (
-      <div className="mt-8 max-w-xl">
-        <p className="text-lg text-foreground/80">
-          Order {state.orderId} submitted
-          {state.totalCents !== undefined ? ` for ${formatPrice(state.totalCents)}` : ""}.
-        </p>
-        <Link href="/products" className="mt-4 inline-block font-medium text-leaf underline">
-          Back to products
-        </Link>
-      </div>
-    );
-  }
 
   if (lines.length === 0) {
     return (
@@ -117,7 +94,7 @@ export function CartSummary({ products, signedIn }: CartSummaryProps) {
           </p>
         ) : (
           <p className="max-w-md text-right text-sm text-foreground/70">
-            Submitting checks each price against the farm database before the order is saved.
+            Each price is checked against the database. Stripe then charges the card. The order stays unpaid until Stripe confirms it.
           </p>
         )}
         {signedIn ? (

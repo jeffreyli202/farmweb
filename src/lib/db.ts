@@ -52,6 +52,9 @@ export function getDb() {
       id INTEGER PRIMARY KEY,
       user_id INTEGER NOT NULL REFERENCES users(id),
       total_cents INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'unpaid',
+      stripe_session_id TEXT,
+      receipt_sent_at TEXT,
       created_at TEXT NOT NULL
     );
 
@@ -67,6 +70,9 @@ export function getDb() {
   `);
   ensureColumn(database, "users", "is_admin", "INTEGER NOT NULL DEFAULT 0");
   ensureColumn(database, "products", "description", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(database, "orders", "status", "TEXT NOT NULL DEFAULT 'unpaid'");
+  ensureColumn(database, "orders", "stripe_session_id", "TEXT");
+  ensureColumn(database, "orders", "receipt_sent_at", "TEXT");
   seedProducts(database);
 
   return database;
@@ -74,7 +80,7 @@ export function getDb() {
 
 function ensureColumn(
   db: DatabaseSync,
-  table: "users" | "products",
+  table: "users" | "products" | "orders",
   column: string,
   definition: string,
 ) {

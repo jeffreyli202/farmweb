@@ -113,7 +113,8 @@ export default async function AdminPage({
                   <p className="font-medium">{formatPrice(order.totalCents)}</p>
                 </div>
                 <p className="mt-1 text-sm text-foreground/70">
-                  {order.email} · {dateFormat.format(new Date(order.createdAt))}
+                  {order.email} · {order.status === "paid" ? "Paid" : "Unpaid"} ·{" "}
+                  {dateFormat.format(new Date(order.createdAt))}
                 </p>
                 <ul className="mt-4 space-y-1 text-sm">
                   {order.items.map((item) => (

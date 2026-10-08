@@ -1,4 +1,7 @@
+import { headers } from "next/headers";
+import type Stripe from "stripe";
 import { getDb } from "@/lib/db";
+import { getStripe } from "@/lib/stripe";
 import { getCurrentUser } from "@/lib/users";
 
 export type CatalogProduct = {
@@ -12,8 +15,14 @@ export type CatalogProduct = {
 
 export type OrderState = {
   error?: string;
-  orderId?: number;
-  totalCents?: number;
+  checkoutUrl?: string;
+};
+
+export type StoredOrder = {
+  id: number;
+  totalCents: number;
+  status: "unpaid" | "paid";
+  createdAt: string;
 };
 
 type ProductRow = {
@@ -110,15 +119,21 @@ export async function placeOrder(formData: FormData): Promise<OrderState> {
     });
   }
 
+  const stripe = getStripe();
+  if (!stripe) {
+    return { error: "Card payments are not configured yet." };
+  }
+
   const totalCents = lines.reduce((sum, line) => sum + line.lineCents, 0);
   db.exec("BEGIN");
+  let orderId = 0;
   try {
     const created = db
       .prepare(
-        "INSERT INTO orders (user_id, total_cents, created_at) VALUES (?, ?, ?)",
+        "INSERT INTO orders (user_id, total_cents, status, created_at) VALUES (?, ?, 'unpaid', ?)",
       )
       .run(user.id, totalCents, new Date().toISOString());
-    const orderId = Number(created.lastInsertRowid);
+    orderId = Number(created.lastInsertRowid);
     const insertItem = db.prepare(
       `INSERT INTO order_items
          (order_id, product_id, name, unit_price_cents, quantity, line_cents)
@@ -135,9 +150,114 @@ export async function placeOrder(formData: FormData): Promise<OrderState> {
       );
     }
     db.exec("COMMIT");
-    return { orderId, totalCents };
   } catch (error) {
     db.exec("ROLLBACK");
     throw error;
   }
+
+  const origin = await appOrigin();
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: "payment",
+      customer_email: user.email,
+      line_items: lines.map((line) => ({
+        quantity: line.quantity,
+        price_data: {
+          currency: "usd",
+          unit_amount: line.unitPriceCents,
+          product_data: { name: line.name },
+        },
+      })),
+      metadata: { orderId: String(orderId) },
+      success_url: `${origin}/orders/${orderId}?session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${origin}/cart`,
+    });
+    if (!session.url) {
+      throw new Error("Stripe did not return a checkout URL.");
+    }
+    db.prepare("UPDATE orders SET stripe_session_id = ? WHERE id = ?").run(session.id, orderId);
+    return { checkoutUrl: session.url };
+  } catch (error) {
+    db.prepare("DELETE FROM orders WHERE id = ?").run(orderId);
+    console.error(error);
+    return { error: "Payment could not be started. Nothing was charged." };
+  }
+}
+
+export function applyCheckoutSession(session: Stripe.Checkout.Session) {
+  if (session.payment_status !== "paid" || session.amount_total === null) {
+    return "unpaid" as const;
+  }
+  const orderId = Number(session.metadata?.orderId);
+  if (!Number.isInteger(orderId)) {
+    return "mismatch" as const;
+  }
+  return markOrderPaid(orderId, session.id, session.amount_total);
+}
+
+export async function recordPaidCheckoutSession(sessionId: string) {
+  const stripe = getStripe();
+  if (!stripe) {
+    return "unconfigured" as const;
+  }
+  const session = await stripe.checkout.sessions.retrieve(sessionId);
+  return applyCheckoutSession(session);
+}
+
+export function markOrderPaid(orderId: number, sessionId: string, amountTotal: number) {
+  const db = getDb();
+  const order = db
+    .prepare("SELECT id, total_cents, status, stripe_session_id FROM orders WHERE id = ?")
+    .get(orderId) as
+    | { id: number; total_cents: number; status: string; stripe_session_id: string | null }
+    | undefined;
+  if (!order) {
+    return "missing" as const;
+  }
+  if (order.stripe_session_id && order.stripe_session_id !== sessionId) {
+    return "mismatch" as const;
+  }
+  if (order.total_cents !== amountTotal) {
+    return "mismatch" as const;
+  }
+  if (order.status === "paid") {
+    return "paid" as const;
+  }
+  db.prepare(
+    "UPDATE orders SET status = 'paid', stripe_session_id = ? WHERE id = ? AND status = 'unpaid'",
+  ).run(sessionId, orderId);
+  return "paid" as const;
+}
+
+export async function getOwnOrder(orderId: number): Promise<StoredOrder | undefined> {
+  const user = await getCurrentUser();
+  if (!user) {
+    return undefined;
+  }
+  const row = getDb()
+    .prepare(
+      "SELECT id, total_cents, status, created_at FROM orders WHERE id = ? AND user_id = ?",
+    )
+    .get(orderId, user.id) as
+    | { id: number; total_cents: number; status: string; created_at: string }
+    | undefined;
+  if (!row || (row.status !== "paid" && row.status !== "unpaid")) {
+    return undefined;
+  }
+  return {
+    id: row.id,
+    totalCents: row.total_cents,
+    status: row.status,
+    createdAt: row.created_at,
+  };
+}
+
+async function appOrigin() {
+  if (process.env.APP_URL) {
+    return process.env.APP_URL.replace(/\/$/, "");
+  }
+  const headerList = await headers();
+  const host = headerList.get("x-forwarded-host") ?? headerList.get("host") ?? "localhost:3000";
+  const proto = headerList.get("x-forwarded-proto") ?? "http";
+  return `${proto}://${host}`;
 }
